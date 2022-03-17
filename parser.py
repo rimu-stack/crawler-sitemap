@@ -1,58 +1,85 @@
-from typing import Any
-import requests
-from bs4 import BeautifulSoup
+import re
+from urllib.parse import urlparse
+import urllib.request
 import datetime
-import time
 
-class ParSite:
-
-    queue : str = []
-    visited : str = []
+class Crawler:
 
     def __init__(self, site: str) -> None:
         self.site = site
+        self.host = urlparse(site).netloc
         self.queue = [site]
+        self.visited = []
+
+    def is_iternal(self, link: str) -> bool:
+        return urlparse(link).netloc == self.host
 
     def _link_conversion(self, links: list) -> list:
-        # for link in self.links:
-        #     if link[:1] != 'h':
-        #         link = self.site + link
-        con_links = sorted([self.site + link if link[:1] != 'h' else link for link in links])
-        return [link[:-1] if link[-1:] == '/' else link for link in con_links]
-    
-    def get_response(self, url: str) -> Any:
-        for i in range(10):
-            try:
-                return requests.get(url, timeout=2.5)
-            except Exception as ex:
-                print("cannot crawl url {} by reason {}. retry in 1 sec".format(url, ex))
-                time.sleep(1)
-        return requests.Response()
+        conversion_links = []
+        for link in links:
+            if self.is_iternal(link):
+                continue
 
-    def get_all_links(self) -> Any:
+            link = '%20'.join(link.split())
+
+            check = (link not in conversion_links
+                     or link[:-1] not in conversion_links)
+
+            if link.startswith('http:'):
+                link = 'https:' + link[5:]
+                if check:
+                    conversion_links.append(link)
+                    continue
+            
+            if link.startswith('/'):
+                link = self.site + link
+                conversion_links.append(link)
+
+            if link.endswith('/'):
+                link = link[:-1]
+                if link.endswith('/'):
+                    link = link[:-1]
+                    if check:
+                        conversion_links.append(link)
+                        continue
+
+                if check:
+                        conversion_links.append(link)
+                        continue
+
+            if link == '#':
+                continue
+
+        return conversion_links
+
+    def get_all_links(self) -> None:
         for link in self.queue:
-            print(link)
-            response = self.get_response(link)
+            print('Proccesing ' + link)
+            try:
+                response = urllib.request.urlopen(link)
+            except:
+                continue
+
+            if link in self.visited:
+                continue
+
             self.visited.append(link)
             self.queue.remove(link)
-            # for line in r.text.split('\n'):
-            #     if line.split() == []:
-            #         continue
+        
+            page = str(response.read())
+            pattern = '<a [^>]*href=[\'|"](.*?)[\'"].*?>'
+        
+            links = re.findall(pattern, page)
+        
+            self.queue.extend([link for link in self._link_conversion(links) if link not in self.visited and link not in self.queue and self.is_iternal(link)])
 
-            #     if line.split()[0] == '<a':
-            #         print(line.split())
-            
-            bs = BeautifulSoup(response.text, 'lxml')
-            
-            links = [str(el.get('href')) for el in bs.find_all('a')]
-            
-            self.queue.extend([link for link in self._link_conversion(links) if link not in self.visited])
+
         
-        
+    
 if __name__ == '__main__':
     startTime = datetime.datetime.now()
-    parsing = ParSite('https://crawler-test.com')
-    parsing.get_all_links()
+    crawler = Crawler('https://crawler-test.com')
+    crawler.get_all_links()
     print(datetime.datetime.now() - startTime)
-    for link in parsing.visited:
+    for link in sorted(crawler.visited):
         print(link)
